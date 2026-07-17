@@ -100,13 +100,13 @@ function emptySse(): Response {
   );
 }
 
-function sessionState() {
+function sessionState(threadId = THREAD_ID) {
   return {
     controllerId: 'code',
     resourceId: RESOURCE_ID,
     modeId: 'build',
     modelId: 'openai/gpt-4o-mini',
-    threadId: THREAD_ID,
+    threadId,
     settings: { yolo: false, thinkingLevel: 'medium', notifications: 'bell', smartEditing: true },
   };
 }
@@ -160,9 +160,11 @@ const linearIssues: LinearIssue[] = [
 interface AppHandlerOptions {
   intakeConfig?: IntakeConfig;
   linearStatus?: LinearStatus;
+  sessionThreadId?: string;
 }
 
 function useAppHandlers(githubStatus: GithubStatus, options: AppHandlerOptions = {}) {
+  const sessionThreadId = options.sessionThreadId ?? THREAD_ID;
   server.use(
     http.get(`${TEST_BASE_URL}/auth/me`, () => new Response(null, { status: 404 })),
     http.get(`${TEST_BASE_URL}/web/github/status`, () => HttpResponse.json(githubStatus)),
@@ -173,15 +175,15 @@ function useAppHandlers(githubStatus: GithubStatus, options: AppHandlerOptions =
       HttpResponse.json(options.linearStatus ?? linearDisabledStatus),
     ),
     http.post(`${API}/sessions`, () =>
-      HttpResponse.json({ controllerId: 'code', resourceId: RESOURCE_ID, threadId: THREAD_ID }),
+      HttpResponse.json({ controllerId: 'code', resourceId: RESOURCE_ID, threadId: sessionThreadId }),
     ),
     http.get(`${API}/modes`, () => HttpResponse.json({ modes: [{ id: 'build', label: 'Build' }] })),
     http.get(`${API}/models`, () => HttpResponse.json({ models: [] })),
-    http.get(SESSION, () => HttpResponse.json(sessionState())),
-    http.put(`${SESSION}/state`, () => HttpResponse.json(sessionState())),
+    http.get(SESSION, () => HttpResponse.json(sessionState(sessionThreadId))),
+    http.put(`${SESSION}/state`, () => HttpResponse.json(sessionState(sessionThreadId))),
     http.get(`${SESSION}/permissions`, () => HttpResponse.json({ categories: {}, tools: {} })),
     http.get(`${SESSION}/threads`, () => HttpResponse.json({ threads: [] })),
-    http.get(`${SESSION}/threads/${THREAD_ID}/messages`, () => HttpResponse.json({ messages: [] })),
+    http.get(`${SESSION}/threads/${sessionThreadId}/messages`, () => HttpResponse.json({ messages: [] })),
     http.get(`${SESSION}/stream`, () => emptySse()),
   );
 }
@@ -698,56 +700,75 @@ describe('Factory Board — persisted cards', () => {
     startedBy: 'user-1',
   };
 
-  it('given related Work and Review sessions, when the related session is opened from a thread, then its worktree becomes active before navigation', async () => {
-    const reviewWorktreePath = '/sandbox/mastra/worktrees/factory-pr-34';
-    const relatedProject: Project = {
-      ...projectWithIssueWorktree,
-      selectedWorktreePath: issueWorktreePath,
-      worktrees: [
-        ...(projectWithIssueWorktree.worktrees ?? []),
-        { branch: 'factory/pr-34', worktreePath: reviewWorktreePath, baseBranch: 'main' },
-      ],
-    };
-    useBoardHandlers({
-      workItems: [
-        makeWorkItem({
-          id: 'wi-issue',
-          title: 'Fix flaky test',
-          source: 'github-issue',
-          sourceKey: 'github-issue:12',
-          stages: ['review'],
-          sessions: { work: { ...issueWorkSession, threadId: THREAD_ID } },
-        }),
-        makeWorkItem({
-          id: 'wi-review',
-          parentWorkItemId: 'wi-issue',
-          title: 'Review fix flaky test',
-          source: 'github-pr',
-          sourceKey: 'github-pr:34',
-          stages: ['review'],
-          sessions: {
-            review: {
-              projectPath: reviewWorktreePath,
-              branch: 'factory/pr-34',
-              threadId: 'thread-related-review',
-              startedBy: 'user-1',
-            },
-          },
-        }),
-      ],
-    });
-    const { router } = renderAt(`/threads/${THREAD_ID}`, relatedProject);
+  const reviewWorktreePath = '/sandbox/mastra/worktrees/factory-pr-34';
+  const relatedWorkItems = [
+    makeWorkItem({
+      id: 'wi-issue',
+      title: 'Fix flaky test',
+      source: 'github-issue',
+      sourceKey: 'github-issue:12',
+      stages: ['review'],
+      sessions: { work: { ...issueWorkSession, threadId: THREAD_ID } },
+    }),
+    makeWorkItem({
+      id: 'wi-review',
+      parentWorkItemId: 'wi-issue',
+      title: 'Review fix flaky test',
+      source: 'github-pr',
+      sourceKey: 'github-pr:34',
+      stages: ['review'],
+      sessions: {
+        review: {
+          projectPath: reviewWorktreePath,
+          branch: 'factory/pr-34',
+          threadId: 'thread-related-review',
+          startedBy: 'user-1',
+        },
+      },
+    }),
+  ];
 
-    const openRelated = await screen.findByRole('button', {
-      name: 'Open related review session: Review fix flaky test',
-    });
-    await userEvent.click(openRelated);
+  it.each([
+    {
+      surface: 'Work',
+      initialThreadId: THREAD_ID,
+      initialWorktreePath: issueWorktreePath,
+      buttonName: 'Open related review session: Review fix flaky test',
+      destinationThreadId: 'thread-related-review',
+      destinationWorktreePath: reviewWorktreePath,
+    },
+    {
+      surface: 'Review',
+      initialThreadId: 'thread-related-review',
+      initialWorktreePath: reviewWorktreePath,
+      buttonName: 'Open related work session: Fix flaky test',
+      destinationThreadId: THREAD_ID,
+      destinationWorktreePath: issueWorktreePath,
+    },
+  ])(
+    'given related sessions on the $surface thread, when the related session is opened, then its worktree becomes active before navigation',
+    async ({ initialThreadId, initialWorktreePath, buttonName, destinationThreadId, destinationWorktreePath }) => {
+      const relatedProject: Project = {
+        ...projectWithIssueWorktree,
+        selectedWorktreePath: initialWorktreePath,
+        worktrees: [
+          ...(projectWithIssueWorktree.worktrees ?? []),
+          { branch: 'factory/pr-34', worktreePath: reviewWorktreePath, baseBranch: 'main' },
+        ],
+      };
+      useBoardHandlers({ workItems: relatedWorkItems });
+      const { router } = renderAt(`/threads/${initialThreadId}`, relatedProject, connectedStatus, {
+        sessionThreadId: initialThreadId,
+      });
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/threads/thread-related-review'));
-    expect(JSON.parse(localStorage.getItem('mastracode-projects') ?? '[]')).toMatchObject([
-      { selectedWorktreePath: reviewWorktreePath },
-    ]);
-  });
+      await userEvent.click(await screen.findByRole('button', { name: buttonName }));
+
+      await waitFor(() => expect(router.state.location.pathname).toBe(`/threads/${destinationThreadId}`));
+      expect(JSON.parse(localStorage.getItem('mastracode-projects') ?? '[]')).toMatchObject([
+        { selectedWorktreePath: destinationWorktreePath },
+      ]);
+    },
+  );
 
   it('given a work item with sessions, when the Board renders, then the card links to its thread', async () => {
     useBoardHandlers({

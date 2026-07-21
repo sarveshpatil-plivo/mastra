@@ -1,13 +1,13 @@
 # AGENTS.md — @mastra/plivo
 
-Integration-specific context for the Plivo package. The host-agnostic Plivo API contracts live
-in the Plivo KB; this file records how they map onto Mastra and the decisions made here.
+Integration-specific context for the Plivo package. The host-agnostic Plivo API contracts follow
+the public Plivo docs (https://www.plivo.com/docs/); this file records how they map onto Mastra
+and the decisions made here.
 
 ## What this package is
 
-Plivo tools and an inbound webhook for Mastra agents, mirroring the shape of the sibling
-`integrations/tavily` package (factory-per-tool + a `create*Tools` aggregator + a `client.ts`)
-and the `integrations/livekit` `ApiRoute` webhook pattern (`src/routes.ts`).
+Plivo tools and an inbound webhook for Mastra agents (factory-per-tool + a `create*Tools`
+aggregator + a `client.ts`, plus an `ApiRoute` webhook in `src/routes.ts`).
 
 - `src/client.ts` — resolves credentials (`authId`/`authToken`/`src`) from options or env,
   builds the HTTP Basic header and the REST base URL.
@@ -25,7 +25,7 @@ and the `integrations/livekit` `ApiRoute` webhook pattern (`src/routes.ts`).
 - No Plivo SDK dependency — the two REST calls use `fetch` with HTTP Basic auth, which keeps the
   package dependency-free (matches how lightweight the surface is).
 
-## Plivo contract (grounded in the Plivo KB)
+## Plivo contract
 
 - Base URL: `https://api.plivo.com/v1/Account/{AUTH_ID}`. Console is **cx.plivo.com** (never
   console.plivo.com).
@@ -43,9 +43,9 @@ and the `integrations/livekit` `ApiRoute` webhook pattern (`src/routes.ts`).
 ## Conventions
 
 - Tool `id`s are kebab-case (`plivo-send-sms`, `plivo-make-call`); aggregator keys are camelCase
-  (`plivoSendSms`, `plivoMakeCall`) — mirrors tavily.
+  (`plivoSendSms`, `plivoMakeCall`).
 - Secrets are env placeholders only: `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_SRC`.
-- Signup / credentials links in docs use the locked campaign URL
-  `https://cx.plivo.com/?utm_source=github&utm_medium=oss&utm_campaign=mastra`.
+- Signup / credentials links in docs point to the
+  [Plivo console](https://cx.plivo.com/?utm_source=github&utm_medium=oss&utm_campaign=mastra).
 - The inbound route defaults to `requiresAuth: false` (Plivo cannot present Mastra auth);
   authenticity should be enforced via Plivo's `X-Plivo-Signature-V3` header.
